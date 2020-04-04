@@ -1,0 +1,333 @@
+---
+title: <center> DengAI Predicting Disease Spread </center> 
+author: 
+output:
+  html_document:
+  code_folding: show
+  highlight: monochrome
+  theme: flatly
+  pdf_document: default
+  word_document: default
+---
+
+# {.tabset .tabset-fade .tabset-pills}
+
+
+## Summary 
+<font size ="4">
+Dengue fever is  a mosquito born disease which occurs in the tropical and subtropical parts of the world. Since, it is carried out by the mosquitoes, the transmission of the disease is related to the climate variables such as precipitation and temperature. The disease is mainly seen in Southeast Asia and Pacific Islands. According to Datadriven website, half a million cases of the dengue fever are reported in the Latin America.  
+
+*Data Source* - The dataset was collected and publicaly shared by *"DrivenData.org"*.The link to original dataset can be found [here](https://www.drivendata.org/competitions/44/dengai-predicting-disease-spread/data/).The environmental data  has been collected by the U.S. Federal Government agencies - Centers for Disease Control (CDC) and Prevention to the National Oceanic and Atmospheric Administration (NOAA).
+
+*Goal* - The goal of this project is to build supervised learning model to predict the number of dengue fever cases each week in the cities of *San Juan, Puerto Rico and Iquitos, Peru*. 
+
+*Algorithms used* - We plan to use Decision Tree, Random Forest and Gradient Boosting supervised learning algorithms for building the model and compare their performance.
+
+*Final model*- 
+
+![image](https://community.drivendata.org/uploads/default/original/1X/0f3a28954438c90e1935d61f3f2c23e906feb39a.jpg)
+
+
+## Libraries used
+
+adding data dictionary
+```{r 1}
+library(RCurl)
+library(e1071)
+#install.packages("caret")
+library(caret)
+# install.packages("doSNOW")
+library(doSNOW)
+library(ipred)
+# install.packages("xgboost")
+library(xgboost)
+library(dplyr)
+library(tidyr)
+library(naniar)
+library(psych)
+library(grid)
+library(ggplot2)
+#library(devtools)
+#devtools::install_github('topepo/caret/pkg/caret')
+```
+## Data Preparation
+
+The dataset contains both train and test data. We will split train data further into train and test datasets. We plan to use test dataset solely for the validation purpose. 
+
+### Import & Merge
+
+Importing dengue_features_train dataset using "getURL" method. This dataset contains information about the various features that can affect the occurrence of the dengue disease.
+
+```{r 2}
+trfeat <- getURL("https://s3.amazonaws.com/drivendata/data/44/public/dengue_features_train.csv")
+trfeat <-read.csv(text = trfeat)
+```
+
+Importing dengue_labels_train set dataset.This dataset contains information such as number of dengue cases by same week, year, and city and number of cases.
+
+```{r 3}
+trlabel <- getURL("https://s3.amazonaws.com/drivendata/data/44/public/dengue_labels_train.csv")
+trlabel <- read.csv(text = trlabel)
+```
+
+Merging the two datasets: "dengue_labels_train" and "dengue_labels_train dataset". The "city", "year", and "week" are the common fields in both the files. So, we will use them for merging the two datasets
+
+```{r 4}
+trfinal <- merge(trfeat, trlabel, by=c("city", "year", "weekofyear"))
+train <- trfinal
+head(trfinal)
+```
+
+*Encoding*
+We grouped all the feature variables and performed dummy encoding for all the features. All the features, have the scaled values. We have removed columns [1:3] i.e. "city", "year", "week of the year" column as hey are categorical variables. We have removed the response variable from the training set.
+
+```{r 5}
+train$city <- as.factor(train$city)
+features <- c("city","year","weekofyear","ndvi_ne","ndvi_nw","ndvi_se",  
+"ndvi_sw", "precipitation_amt_mm", "reanalysis_air_temp_k", "reanalysis_avg_temp_k","reanalysis_dew_point_temp_k", "reanalysis_max_air_temp_k",  "reanalysis_min_air_temp_k", "reanalysis_precip_amt_kg_per_m2", "reanalysis_relative_humidity_percent", "reanalysis_sat_precip_amt_mm",         
+"reanalysis_specific_humidity_g_per_kg", "reanalysis_tdtr_k",                  "station_avg_temp_c", "station_diur_temp_rng_c", "station_max_temp_c" ,  "station_min_temp_c", "station_precip_mm","total_cases")
+
+train <- train[, features]
+dummy.vars <- dummyVars(~ ., data = train[, -c(1:3,24)])
+train.dummy <- predict(dummy.vars, train[, -c(1:3,24)])
+head(train.dummy)
+```
+
+Check missing values
+```{r}
+naniar::gg_miss_var(train.dummy) +
+  theme_minimal()+
+  labs(y = "Missing Values in the dataset")
+```
+
+
+The above graph shows the number of missing values in the dataset.
+
+### Imputation 
+
+Performing imputation for the missing values using "Out of Bag" method.
+
+```{r 6}
+pre.process <- preProcess(train.dummy, method = "bagImpute")
+imputed.data <- predict(pre.process, train.dummy) 
+train$ndvi_ne <- imputed.data[,1]
+train$ndvi_nw <- imputed.data[,2]
+train$ndvi_se <- imputed.data[,3]
+train$ndvi_sw <- imputed.data[,4]
+train$precipitation_amt_mm <- imputed.data[,5]
+train$reanalysis_air_temp_k <- imputed.data[, 6]
+train$reanalysis_avg_temp_k <- imputed.data[,7]
+train$reanalysis_dew_point_temp_k <- imputed.data[,8]
+train$reanalysis_max_air_temp_k <- imputed.data[,9]
+train$reanalysis_min_air_temp_k <- imputed.data[,10]
+train$reanalysis_precip_amt_kg_per_m2 <- imputed.data[,11]
+train$reanalysis_relative_humidity_percent <- imputed.data[,12]
+train$reanalysis_sat_precip_amt_mm <- imputed.data[,13]
+train$reanalysis_specific_humidity_g_per_kg <- imputed.data[,14]
+train$reanalysis_tdtr_k <- imputed.data[,15]
+train$station_avg_temp_c <- imputed.data[,16]
+train$station_diur_temp_rng_c <- imputed.data[,17]
+train$station_max_temp_c <- imputed.data[,18]
+train$station_min_temp_c <- imputed.data[,19]
+train$station_precip_mm <- imputed.data[,20]
+```
+
+The features that previously contained blank value, now they contain new predicted values. 
+All the values have been imputed using bagImpute method.
+
+
+Also, Dropping the unnecessary columns from the dataset as they contain redundant data. Some temperature related features are repeated twice in the dataset, one in Kelvin and one in Celcius.
+
+Dropping unnecessary data:
+```{r}
+train <- imputed.data[,-c(16:19)]
+```
+
+Check any missing values in imputed data.
+```{r 7}
+anyNA(train)
+naniar::gg_miss_var(train) +
+  theme_minimal()+
+  labs(y = "Missing Values in the dataset")
+```
+
+There are no missing values in the dataset.
+
+
+Data Scaling
+```{r}
+train <- scale(train, center = TRUE, scale = TRUE)
+```
+
+
+## Data Analysis
+
+### Correlation matrix
+```{r}
+library(corrplot)
+corrplot(cor(train),type = "lower", method="number", number.cex=.51)
+
+#histogram
+ggplot(gather(train),aes(value)) + geom_histogram() + facet_wrap(key~.,scales="free_x")
+
+```
+
+```{r}
+#Scatterplot
+library(psych)
+pairs.panels(train,alpha=.05, pch=20)
+```
+
+
+Splitting the training set 80:20, and checking the dimensions of split sets
+```{r 8}
+set.seed(54321)
+indexes <- createDataPartition(train$total_cases, times = 1, p = .8, list = FALSE)
+deng.train <- train[indexes,]
+deng.test <- train[-indexes,]
+dim(deng.test)
+dim(deng.train)
+```
+
+Defining the training control using repeated cross validation
+```{r 9}
+train.control <- trainControl(method = "repeatedcv",
+                              number = 5,
+                              repeats = 20,
+                              search = "grid")
+```
+
+
+Defining the tuning grid
+```{r 10}
+tune.grid <- expand.grid(eta = c(0.05, 0.06, 0.1),
+                         nrounds = c(30, 60, 70),
+                         max_depth = 3:8,
+                         min_child_weight = c(2.0, 2.25, 2.5, 10),
+                         colsample_bytree = c(0.3, 0.4, 0.5),
+                         gamma = c(0, 0.01, 0.001),
+                         subsample = 1)
+```
+
+Registering clusters on RAM to improve computer performance while running the ML algorithm
+```{r 11}
+cl <- makeCluster(3, type = "SOCK")
+registerDoSNOW(cl)
+```
+
+Subsetting the traiing data for selective predictors in the subset, based on regression tree analysis performed separately for determing the significant contributers
+```{r 12}
+train2 = train[, c(1, 3, 4, 5, 6, 7, 11, 13, 17, 18, 24)]
+```
+
+Obtaining the regressor from training dataset using the tuning grid and train controls and selective predictors from decision tree analysis
+```{r 13}
+caret.cv <- train(total_cases ~ .,
+                  data = train2,
+                  method = "xgbTree",
+                  tuneGrid = tune.grid,
+                  trControl = train.control)
+```
+
+Stopping the clusters started earlier to free RAM
+```{r 14}
+stopCluster(cl)
+```
+
+Predicting 'total_cases' (rounded to nearest 0 place of decimal) on split test-set using the regressor from split train-set
+```{r 15}
+preds <- predict(caret.cv, deng.test)
+totalpredcasestrtest <- round(preds)
+```
+
+Plotting predicted and acutal total_cases
+```{r 16}
+par(mfrow=c(2,1))
+plot(totalpredcasestrtest)
+plot(deng.test$total_cases)
+```
+
+Checking mean absolute error (MAE)
+```{r}
+actual = deng.test$total_cases
+predicted = totalpredcasestrtest
+mae <- function(error)
+{
+  mean(abs(error))
+}
+error <- (actual-predicted)
+mae(error)
+```
+
+Importing the test set from the host site
+```{r}
+testset <- getURL("https://s3.amazonaws.com/drivendata/data/44/public/dengue_features_test.csv")
+testset <- read.csv(text=testset)
+ts <- testset[, -c(4)]
+names(ts)
+ts$total_cases <- NA
+```
+
+Imputing missing values for the test set
+```{r}
+ts <- ts[, features]
+ts$city <- as.factor(ts$city)
+ts$weekofyear <- as.numeric(ts$weekofyear)
+
+tsdummy.vars <- dummyVars(~ ., data = ts[, -c(1:3,24)])
+ts.dummy <- predict(tsdummy.vars, ts[, -c(1:3,24)])
+
+tspre.process <- preProcess(ts.dummy, method = "bagImpute")
+tsimputed.data <- predict(tspre.process, ts.dummy)     
+
+ts$ndvi_ne <- tsimputed.data[,1]
+ts$ndvi_nw <- tsimputed.data[,2]
+ts$ndvi_se <- tsimputed.data[,3]
+ts$ndvi_sw <- tsimputed.data[,4]
+ts$precipitation_amt_mm <- tsimputed.data[,5]
+ts$reanalysis_air_temp_k <- tsimputed.data[, 6]
+ts$reanalysis_avg_temp_k <- tsimputed.data[,7]
+ts$reanalysis_dew_point_temp_k <- tsimputed.data[,8]
+ts$reanalysis_max_air_temp_k <- tsimputed.data[,9]
+ts$reanalysis_min_air_temp_k <- tsimputed.data[,10]
+ts$reanalysis_precip_amt_kg_per_m2 <- tsimputed.data[,11]
+ts$reanalysis_relative_humidity_percent <- tsimputed.data[,12]
+ts$reanalysis_sat_precip_amt_mm <- tsimputed.data[,13]
+ts$reanalysis_specific_humidity_g_per_kg <- tsimputed.data[,14]
+ts$reanalysis_tdtr_k <- tsimputed.data[,15]
+ts$station_avg_temp_c <- tsimputed.data[,16]
+ts$station_diur_temp_rng_c <- tsimputed.data[,17]
+ts$station_max_temp_c <- tsimputed.data[,18]
+ts$station_min_temp_c <- tsimputed.data[,19]
+ts$station_precip_mm <- tsimputed.data[,20]
+```
+
+Predicting the 'total_cases' for the test set using the regressor from the training set
+```{r}
+ts$total_cases <- round(predict(caret.cv, ts))
+
+```
+
+Plotting the time-series for the total_cases in the test set
+```{r}
+par(mfrow=c(1,1))
+plot(ts$total_cases)
+```
+
+Downloading the submission form 
+```{r}
+Submitformat <- getURL("https://s3.amazonaws.com/drivendata/data/44/public/submission_format.csv")
+submitformat2 <- read.csv(text=Submitformat)
+```
+
+Entering the predicted 'total_cases' from the test-set into the submission form
+```{r}
+submitformat2$total_cases<- ts$total_cases
+```
+
+Exporting the submission form to local drive for uploading to the competition site
+```{r}
+write.csv(submitformat2, "D://STUDY//MSIS//DM//submit031920xgb_send.csv", row.names = FALSE)
+```
+
+
